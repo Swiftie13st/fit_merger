@@ -2,18 +2,6 @@
 
 这是一个用于合并多个FIT文件的Go工具，可以将多个骑行活动记录合并为一个连续的骑行活动。
 
-## 更新通知：统一合并器 + 详细数据保留 + 上传平台兼容性优化
-
-**✅ 最新版本引入统一合并器，并修复了功率、踏频等详细数据丢失问题！**
-
-我们创建了新的统一合并器，整合了所有功能，并修复了详细数据保留问题：
-
-- **统一合并器**：整合所有合并方法，支持多种合并策略
-- **增强版合并器**：针对上传平台兼容性优化，包含更多数据字段
-- **详细数据保留**：完整保留功率、踏频、心率、速度、距离、海拔等所有详细数据
-- **单一会话合并**：将多个会话合并为单一会话的连续活动
-- **数据完整性修复**：确保距离、时间、卡路里、海拔等统计数据完整累加
-
 ## 可用工具
 
 ### 1. 统一合并器 (unified_fit_merger) - 强烈推荐
@@ -86,6 +74,18 @@ go build -o unified_fit_merger unified_fit_merger.go
 ./unified_fit_merger -h
 ./fit_converter.sh -h
 ```
+
+
+## 合并效果
+
+原始的码表数据：
+![fit_files](https://raw.githubusercontent.com/Swiftie13st/Figurebed/main/img/2026050704.png)
+合并后fit文件上传到strava:
+![before](https://raw.githubusercontent.com/Swiftie13st/Figurebed/main/img/2026050701.png)
+
+![after](https://raw.githubusercontent.com/Swiftie13st/Figurebed/main/img/2026050702.png)
+最终的Strava结果:
+![strava](https://raw.githubusercontent.com/Swiftie13st/Figurebed/main/img/2026050703.png)
 
 ## 合并器类型说明
 
@@ -180,6 +180,7 @@ go build -o unified_fit_merger unified_fit_merger.go
 2. **上传平台显示数据不符**
    - 使用增强版合并器（`-t enhanced`），专门针对上传平台优化
    - 确保包含完整的数据字段和详细数据
+   - 距离不符时可以在strava上点击路线更正
 
 3. **"无法解码文件"**
    - 文件可能损坏或不是有效的FIT格式
