@@ -218,27 +218,28 @@ pub fn merge(files: &[FitFile]) -> Result<FitFile, String> {
     })
 }
 
-/// session 聚合器：累加 totals，记录 max/min，按时间加权平均 avg
+/// session 聚合器：累加 totals，记录 max/min，按时间加权平均 avg。
+/// 字段定义号严格遵循 FIT 协议规范（来源：FIT SDK profile）。
 struct SessionAccumulator {
     total_elapsed_time: u64, // field 7, uint32, 1/1000 s
-    total_timer_time: u64,   // field 8
+    total_timer_time: u64,   // field 8, uint32, 1/1000 s
     total_distance: u64,     // field 9, uint32, /100 m
     total_cycles: u64,       // field 10, uint32
-    total_calories: u32,     // field 11, uint16
-    total_ascent: u32,       // field 22, uint16
-    total_descent: u32,      // field 23, uint16
-    max_speed: u16,          // field 14, uint16, /1000 m/s
-    avg_speed_num: u64,      // 加权
+    total_calories: u32,     // field 11, uint16, kcal
+    total_ascent: u32,       // field 22, uint16, m
+    total_descent: u32,      // field 23, uint16, m
+    avg_speed_num: u64,      // field 14, uint16, /1000 m/s（按 timer_time 加权）
     avg_speed_w: u64,
-    max_hr: u8,    // field 16
-    avg_hr_num: u64, // weighted by timer_time
+    max_speed: u16,          // field 15, uint16, /1000 m/s
+    avg_hr_num: u64,         // field 16, uint8, bpm
     avg_hr_w: u64,
-    max_cadence: u8, // field 18
-    avg_cadence_num: u64,
+    max_hr: u8,              // field 17
+    avg_cadence_num: u64,    // field 18, uint8, rpm
     avg_cadence_w: u64,
-    max_power: u16, // field 20
-    avg_power_num: u64,
+    max_cadence: u8,         // field 19
+    avg_power_num: u64,      // field 20, uint16, watts
     avg_power_w: u64,
+    max_power: u16,          // field 21
 }
 
 impl SessionAccumulator {
@@ -287,44 +288,48 @@ impl SessionAccumulator {
             self.total_descent += v as u32;
         }
         if let Some(v) = read_field_u16(def, payload, 14) {
-            self.max_speed = self.max_speed.max(v);
-        }
-        if let Some(v) = read_field_u16(def, payload, 13) {
             // avg_speed
-            self.avg_speed_num += v as u64 * timer.max(1);
-            self.avg_speed_w += timer.max(1);
-        }
-        if let Some(v) = read_field_u8(def, payload, 16) {
-            if v != 0xFF {
-                self.max_hr = self.max_hr.max(v);
+            if v != 0xFFFF {
+                self.avg_speed_num += v as u64 * timer.max(1);
+                self.avg_speed_w += timer.max(1);
             }
         }
-        if let Some(v) = read_field_u8(def, payload, 15) {
+        if let Some(v) = read_field_u16(def, payload, 15) {
+            if v != 0xFFFF {
+                self.max_speed = self.max_speed.max(v);
+            }
+        }
+        if let Some(v) = read_field_u8(def, payload, 16) {
             if v != 0xFF {
                 self.avg_hr_num += v as u64 * timer.max(1);
                 self.avg_hr_w += timer.max(1);
             }
         }
-        if let Some(v) = read_field_u8(def, payload, 18) {
+        if let Some(v) = read_field_u8(def, payload, 17) {
             if v != 0xFF {
-                self.max_cadence = self.max_cadence.max(v);
+                self.max_hr = self.max_hr.max(v);
             }
         }
-        if let Some(v) = read_field_u8(def, payload, 17) {
+        if let Some(v) = read_field_u8(def, payload, 18) {
             if v != 0xFF {
                 self.avg_cadence_num += v as u64 * timer.max(1);
                 self.avg_cadence_w += timer.max(1);
             }
         }
-        if let Some(v) = read_field_u16(def, payload, 20) {
-            if v != 0xFFFF {
-                self.max_power = self.max_power.max(v);
+        if let Some(v) = read_field_u8(def, payload, 19) {
+            if v != 0xFF {
+                self.max_cadence = self.max_cadence.max(v);
             }
         }
-        if let Some(v) = read_field_u16(def, payload, 19) {
+        if let Some(v) = read_field_u16(def, payload, 20) {
             if v != 0xFFFF {
                 self.avg_power_num += v as u64 * timer.max(1);
                 self.avg_power_w += timer.max(1);
+            }
+        }
+        if let Some(v) = read_field_u16(def, payload, 21) {
+            if v != 0xFFFF {
+                self.max_power = self.max_power.max(v);
             }
         }
     }
@@ -489,14 +494,14 @@ fn build_session(
     write_field_u16(&def, &mut data.payload, 11, acc.total_calories.min(0xFFFF) as u16);
     write_field_u16(&def, &mut data.payload, 22, acc.total_ascent.min(0xFFFF) as u16);
     write_field_u16(&def, &mut data.payload, 23, acc.total_descent.min(0xFFFF) as u16);
-    write_field_u16(&def, &mut data.payload, 13, acc.avg_speed());
-    write_field_u16(&def, &mut data.payload, 14, acc.max_speed);
-    write_field_u8(&def, &mut data.payload, 15, acc.avg_hr());
-    write_field_u8(&def, &mut data.payload, 16, acc.max_hr);
-    write_field_u8(&def, &mut data.payload, 17, acc.avg_cadence());
-    write_field_u8(&def, &mut data.payload, 18, acc.max_cadence);
-    write_field_u16(&def, &mut data.payload, 19, acc.avg_power());
-    write_field_u16(&def, &mut data.payload, 20, acc.max_power);
+    write_field_u16(&def, &mut data.payload, 14, acc.avg_speed());
+    write_field_u16(&def, &mut data.payload, 15, acc.max_speed);
+    write_field_u8(&def, &mut data.payload, 16, acc.avg_hr());
+    write_field_u8(&def, &mut data.payload, 17, acc.max_hr);
+    write_field_u8(&def, &mut data.payload, 18, acc.avg_cadence());
+    write_field_u8(&def, &mut data.payload, 19, acc.max_cadence);
+    write_field_u16(&def, &mut data.payload, 20, acc.avg_power());
+    write_field_u16(&def, &mut data.payload, 21, acc.max_power);
 
     Ok((def, data))
 }

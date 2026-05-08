@@ -4,8 +4,10 @@
 pub mod fit_generator;
 pub mod fit_parser;
 pub mod fit_types;
+pub mod inspector;
 pub mod merger;
 
 pub use fit_generator::{write_fit_file, FitGenerator};
 pub use fit_parser::{read_fit_file, FitParser};
+pub use inspector::{format_summary, summarize_file, SessionSummary};
 pub use merger::{merge, merge_fit_files, FitMerger};

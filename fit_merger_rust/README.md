@@ -1,161 +1,118 @@
-# FIT文件合并工具
+# fit_merger
 
-Rust!
+一个用 Rust 编写的 FIT 文件合并 / 检视工具，专为骑行多日记录合并而设计。
 
-## 🎯 功能特点
+## 功能
 
-- **完整FIT协议支持**：实现了FIT文件格式的解析和生成
-- **智能合并**：自动调整距离和时间戳，确保数据连续性
-- **高效处理**：使用Rust编写，性能优异
-- **错误处理**：健壮的错误处理机制，能够处理各种边界情况
+1. **合并多个 FIT 文件为单一会话**
+   - 完整保留所有原始字段：距离 / 时间 / 速度 / 海拔 / 心率 / 踏频 / 功率 / GPS / 温度 / 厂商私有字段……
+   - 重写 `file_id` / `session` / `activity` 三类摘要消息：
+     - 单一 `session`：累加距离 / 计时 / 耗时 / 卡路里 / 爬升 / 下降；按 `timer_time` 加权得出 avg；逐项取 max
+     - 单一 `activity`：`num_sessions = 1`，`total_timer_time` 与合并后 `session` 一致
+     - `file_id`：以最早 `time_created` 为准
+   - 输出文件含合规的 14 字节文件头 CRC + 文件末尾 CRC，可被 Garmin Connect / Strava / fitparser 等工具直接读取
 
-## 📁 项目结构
+2. **inspect 子命令**：打印任意 FIT 文件中的会话摘要，便于对照核查
+   - 距离（km）、耗时 / 计时（hh:mm:ss）、卡路里、爬升 / 下降
+   - 平均 / 最大速度（km/h）、心率（bpm）、踏频（rpm）、功率（W）
+
+## 构建
+
+```bash
+cd fit_merger
+cargo build --release
+```
+
+可执行文件位于 `target/release/fit_merger`。
+
+## 使用
+
+### 合并
+
+显式指定输入与输出：
+
+```bash
+./target/release/fit_merger \
+    in1.fit in2.fit in3.fit ... merged.fit
+```
+
+无参数模式（自动扫描 `../fit_files/*.fit`，跳过文件名以 `merged` 开头者，输出到 `../fit_files/merged.fit`）：
+
+```bash
+./target/release/fit_merger
+```
+
+### 查看会话摘要
+
+```bash
+./target/release/fit_merger inspect file.fit [file2.fit ...]
+```
+
+输出示例：
+
+```
+📄 文件: ../fit_files/公路骑行20260504094905.fit
+  会话 1: 距离=160.906 km, 耗时=05:47:47, 计时=05:04:52, 卡路里=2688 kcal,
+          上升=270 m, 下降=217 m, 平均速度=31.67 km/h, 最大速度=46.68 km/h,
+          平均心率=137 bpm, 最大心率=176 bpm, 平均踏频=85 rpm, 最大踏频=111 rpm,
+          平均功率=135 W, 最大功率=799 W
+
+📄 文件: ../fit_files/merged.fit
+  会话 1: 距离=1020.109 km, 耗时=45:07:00, 计时=37:45:23, 卡路里=17500 kcal,
+          上升=1050 m, 下降=953 m, 平均速度=27.01 km/h, 最大速度=48.56 km/h,
+          平均心率=134 bpm, 最大心率=179 bpm, 平均踏频=80 rpm, 最大踏频=123 rpm,
+          平均功率=118 W, 最大功率=799 W
+```
+
+### 帮助
+
+```bash
+./target/release/fit_merger --help
+```
+
+## 项目结构
 
 ```
 fit_merger/
+├── Cargo.toml
 ├── src/
-│   ├── bin/
-│   │   ├── basic_merge.rs      # 基础合并工具（推荐）
-│   │   ├── merge_real_files.rs # 完整合并工具
-│   │   ├── create_test_files.rs # 创建测试文件
-│   │   └── final_merge_demo.rs # 最终演示
-│   ├── fit_parser.rs           # FIT文件解析器
-│   ├── fit_generator.rs        # FIT文件生成器
-│   ├── fit_types.rs            # FIT数据类型定义
-│   ├── merger.rs               # 合并逻辑
-│   └── lib.rs                  # 库入口
-├── Cargo.toml                  # Rust项目配置
-└── Cargo.lock
+│   ├── fit_types.rs        # FIT 协议字节级数据结构
+│   ├── fit_parser.rs       # 解析器（保留原始 payload 字节）
+│   ├── fit_generator.rs    # 生成器（含正确的 FIT CRC-16）
+│   ├── merger.rs           # 多文件合并逻辑
+│   ├── inspector.rs        # session 摘要提取与格式化
+│   ├── lib.rs
+│   └── main.rs             # CLI 入口
+└── tests/
+    ├── validate_merged.rs  # 用 fitparser 第三方库严格校验合并文件
+    └── dump_summary.rs     # 输出合并文件全部 session/activity 字段
 ```
 
-## 🚀 使用方法
+## 设计要点
 
-### 1. 基础合并（推荐）
+- **字节级合并**：parser 仅解析文件头 / 记录头 / 定义消息，数据消息整体复制原始字节，避免任何字段缩放 / 单位转换的失真。
+- **LMT 重映射**：跨文件合并时，每条 Definition 重新分配 `local_message_type`（0..=12 循环，13/14/15 保留给 activity / session / file_id），避免不同源文件 LMT 冲突。
+- **CRC**：严格按 FIT SDK 4-bit 表查表算法计算文件头 CRC 与末尾 CRC，符合协议要求。
+- **session 字段号**：严格遵循 FIT SDK profile 定义（`avg_speed=14`，`max_speed=15`，`avg_heart_rate=16`，`max_heart_rate=17`，`avg_cadence=18`，`max_cadence=19`，`avg_power=20`，`max_power=21` 等）。
+
+## 测试
 
 ```bash
-cargo run --bin basic_merge
+# 单元测试（CRC 算法、时长格式化）
+cargo test --release --lib
+
+# 集成测试：用 fitparser 0.10 校验 merged.fit 是 CRC 合法、单一 session
+cargo test --release --test validate_merged -- --nocapture
+
+# 输出合并文件 session/activity 全部字段
+cargo test --release --test dump_summary -- --nocapture
 ```
 
-这个工具会：
-- 读取所有骑行FIT文件
-- 提取记录数据
-- 调整距离使其累积
-- 生成合并后的FIT文件
+## 兼容性
 
-### 2. 完整合并
+合并产出的 `.fit` 文件已通过：
 
-```bash
-cargo run --bin merge_real_files
-```
+- [fitparser 0.10](https://crates.io/crates/fitparser) 严格 CRC 校验
+- 字段保留检查：record 中 distance / heart_rate / cadence / power / altitude 全部存在
 
-### 3. 创建测试文件
-
-```bash
-cargo run --bin create_test_files
-```
-
-### 4. 运行演示
-
-```bash
-cargo run --bin final_merge_demo
-```
-
-## 📊 支持的文件
-
-项目包含以下真实骑行数据文件：
-- `公路骑行20260430061420.fit`
-- `公路骑行20260501082327.fit`
-- `公路骑行20260502140948.fit`
-- `公路骑行20260503064808.fit`
-- `公路骑行20260504094905.fit`
-- `公路骑行20260505103329.fit`
-
-## 🎉 输出结果
-
-- `merged_basic.fit` - 基础合并结果
-- `final_merged_demo.fit` - 演示合并结果
-
-## 🔧 技术实现
-
-### FIT协议实现
-
-1. **文件格式**：
-   - 文件头解析和生成
-   - 定义消息处理
-   - 数据消息处理
-   - CRC计算和验证
-
-2. **数据类型**：
-   - 支持所有基础FIT数据类型
-   - 压缩时间戳支持
-   - 字节序处理（大端/小端）
-
-### 合并算法
-
-1. **数据连续性**：
-   - 自动调整时间戳
-   - 自动累积距离
-   - 保持数据完整性
-
-2. **消息处理**：
-   - 记录消息合并
-   - 会话消息更新
-   - 活动消息更新
-
-## 📈 合并结果
-
-基础合并工具成功处理了6个骑行文件：
-- 总记录数：2359条
-- 总距离：2321.234公里
-- 所有数据成功合并到单个FIT文件
-
-## 🛠️ 开发环境
-
-- **语言**：Rust
-- **构建工具**：Cargo
-- **最低版本**：Rust 1.56+
-
-## 📖 使用场景
-
-1. **多日骑行合并**：将连续几天的骑行合并为一次长途骑行
-2. **分段活动合并**：将中断的活动重新合并为完整活动
-3. **数据备份**：将多个小文件合并为一个大文件便于管理
-
-## 🎯 导入到运动平台
-
-合并后的FIT文件可以直接导入到：
-- Garmin Connect
-- Strava
-- TrainingPeaks
-- 其他支持FIT格式的运动分析平台
-
-## 🚀 快速开始
-
-```bash
-# 克隆项目
-git clone <repository-url>
-
-# 进入项目目录
-cd fit_merger
-
-# 运行基础合并
-cargo run --bin basic_merge
-
-# 查看结果
-ls -la ../fit_files/merged_basic.fit
-```
-
-## 📝 注意事项
-
-- 合并后的文件会保留所有原始数据
-- 距离和时间会自动调整以确保连续性
-- 建议在合并前备份原始文件
-- 合并工具会自动跳过无法解析的文件
-
-## 🤝 贡献
-
-欢迎提交问题和改进建议！
-
-## 📄 许可证
-
-MIT License
+可直接导入 Garmin Connect、Strava、TrainingPeaks 等支持 FIT 格式的运动平台。
