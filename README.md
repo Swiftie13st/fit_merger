@@ -1,82 +1,70 @@
-# FIT文件合并工具
+# fit_merger
 
-这是一个用于合并多个FIT文件的Go工具，可以将多个骑行活动记录合并为一个连续的骑行活动。
+一个用 Rust 编写的 FIT 文件合并 / 检视工具，专为骑行多日记录合并而设计。
 
-## 可用工具
+## 功能
 
-### 1. 统一合并器 (unified_fit_merger) - 强烈推荐
-- 整合所有合并功能于一体
-- 支持三种合并策略：简单、现代、增强
-- 使用最新的 `github.com/muktihari/fit` 库
-- 提供最佳兼容性和完整的FIT文件支持
-- 使用方法：`./unified_fit_merger -type enhanced -o output.fit input1.fit input2.fit ...`
+1. **合并多个 FIT 文件为单一会话**
+   - 完整保留所有原始字段：距离 / 时间 / 速度 / 海拔 / 心率 / 踏频 / 功率 / GPS / 温度 / 厂商私有字段……
+   - 重写 `file_id` / `session` / `activity` 三类摘要消息：
+     - 单一 `session`：累加距离 / 计时 / 耗时 / 卡路里 / 爬升 / 下降；按 `timer_time` 加权得出 avg；逐项取 max
+     - 单一 `activity`：`num_sessions = 1`，`total_timer_time` 与合并后 `session` 一致
+     - `file_id`：以最早 `time_created` 为准
+   - 输出文件含合规的 14 字节文件头 CRC + 文件末尾 CRC，可被 Garmin Connect / Strava / fitparser 等工具直接读取
 
-### 2. 智能转换器 (fit_converter.sh) - 推荐
-- 自动使用统一合并器
-- 默认使用增强版合并器（针对上传平台优化）
-- 支持选择合并器类型
-- 使用方法：`./fit_converter.sh [-t TYPE] output.fit input1.fit input2.fit ...`
+2. **inspect 子命令**：打印任意 FIT 文件中的会话摘要，便于对照核查
+   - 距离（km）、耗时 / 计时（hh:mm:ss）、卡路里、爬升 / 下降
+   - 平均 / 最大速度（km/h）、心率（bpm）、踏频（rpm）、功率（W）
 
-## 功能特点
-
-- ✅ 合并多个FIT文件的活动数据
-- ✅ 合并GPS轨迹、心率、功率等记录数据
-- ✅ **将多个会话合并为单一会话的连续活动**
-- ✅ **完整保留所有统计数据（距离、时间、卡路里等）**
-- ✅ **完整保留所有详细数据（功率、踏频、心率、速度、距离、海拔）**
-- ✅ **包含海拔上升/下降数据（增强版）**
-- ✅ 合并圈数信息并重新编号
-- ✅ 按时间戳自动排序所有记录
-- ✅ 保持原始数据的完整性
-- ✅ 支持各种FIT文件格式（包括之前不兼容的）
-
-## 安装
-
-确保已安装Go 1.18或更高版本，然后运行：
+## 构建
 
 ```bash
-# 下载依赖
-go mod tidy
-
-# 编译统一合并器
-go build -o unified_fit_merger unified_fit_merger.go
+cd fit_merger
+cargo build --release
 ```
 
-## 使用方法
+可执行文件位于 `target/release/fit_merger`。
 
-### 基本使用（推荐）
+## 使用
+
+### 合并
+
+显式指定输入与输出：
 
 ```bash
-# 使用智能转换器（默认增强版，针对上传平台优化）
-./fit_converter.sh merged.fit *.fit
-
-# 使用统一合并器（增强版）
-./unified_fit_merger -type enhanced -o merged.fit *.fit
+./target/release/fit_merger \
+    in1.fit in2.fit in3.fit ... merged.fit
 ```
 
-### 高级选项
+无参数模式（自动扫描 `../fit_files/*.fit`，跳过文件名以 `merged` 开头者，输出到 `../fit_files/merged.fit`）：
 
 ```bash
-# 指定合并器类型
-./fit_converter.sh -t enhanced merged.fit *.fit    # 增强版（针对上传平台优化）
-./fit_converter.sh -t modern merged.fit *.fit     # 现代版（单一会话）
-./fit_converter.sh -t simple merged.fit *.fit     # 简单版（保留原始会话）
-
-# 使用统一合并器指定类型
-./unified_fit_merger -type enhanced -o merged.fit *.fit
-./unified_fit_merger -type modern -o merged.fit *.fit
-./unified_fit_merger -type simple -o merged.fit *.fit
+./target/release/fit_merger
 ```
 
-### 查看帮助
+### 查看会话摘要
 
 ```bash
-./unified_fit_merger -h
-./fit_converter.sh -h
+./target/release/fit_merger inspect file.fit [file2.fit ...]
 ```
 
+输出示例：
 
-## 合并效果
+```
+📄 文件: ../fit_files/公路骑行20260504094905.fit
+  会话 1: 距离=160.906 km, 耗时=05:47:47, 计时=05:04:52, 卡路里=2688 kcal,
+          上升=270 m, 下降=217 m, 平均速度=31.67 km/h, 最大速度=46.68 km/h,
+          平均心率=137 bpm, 最大心率=176 bpm, 平均踏频=85 rpm, 最大踏频=111 rpm,
+          平均功率=135 W, 最大功率=799 W
+
+📄 文件: ../fit_files/merged.fit
+  会话 1: 距离=1020.109 km, 耗时=45:07:00, 计时=37:45:23, 卡路里=17500 kcal,
+          上升=1050 m, 下降=953 m, 平均速度=27.01 km/h, 最大速度=48.56 km/h,
+          平均心率=134 bpm, 最大心率=179 bpm, 平均踏频=80 rpm, 最大踏频=123 rpm,
+          平均功率=118 W, 最大功率=799 W
+```
+
+### 合并效果
 
 原始的码表数据：
 ![fit_files](https://raw.githubusercontent.com/Swiftie13st/Figurebed/main/img/2026050704.png)
@@ -87,134 +75,56 @@ go build -o unified_fit_merger unified_fit_merger.go
 最终的Strava结果:
 ![strava](https://raw.githubusercontent.com/Swiftie13st/Figurebed/main/img/2026050703.png)
 
-## 合并器类型说明
 
-### 增强合并器（推荐，针对上传平台优化）
-- **功能**：将多个会话合并为单一会话的连续活动，并优化上传平台兼容性
-- **优势**：
-  - 修复数据完整性问题
-  - 完整累加距离、时间、卡路里等统计数据
-  - 包含海拔上升/下降数据
-  - 针对上传平台兼容性优化
-- **适用场景**：需要上传到其他平台的骑行活动
-
-### 现代合并器
-- **功能**：将多个会话合并为单一会话的连续活动
-- **优势**：修复数据完整性问题，确保距离、时间、卡路里等统计数据完整累加
-- **适用场景**：需要合并为单一会话且保持数据完整性的情况
-
-### 简单合并器
-- **功能**：保留原始会话结构，简单合并所有数据
-- **优势**：兼容性好，适用于各种平台
-- **适用场景**：需要保留原始会话结构的情况
-
-## 示例
-
-假设你有多个骑行活动的FIT文件：
+### 帮助
 
 ```bash
-# 使用智能转换器（推荐，增强版合并器）
-./fit_converter.sh combined_ride.fit morning_ride.fit afternoon_ride.fit evening_ride.fit
-
-# 使用统一合并器（增强版）
-./unified_fit_merger -type enhanced -o combined_ride.fit morning_ride.fit afternoon_ride.fit evening_ride.fit
+./target/release/fit_merger --help
 ```
 
-## 修复后的测试结果
+## 项目结构
 
-我们已经成功测试了统一合并器，它能够处理：
-
-- ✅ 原始不兼容的FIT文件
-- ✅ 各种FIT文件格式
-- ✅ 包含大量记录的文件（>135,000条记录）
-- ✅ **将多个会话合并为单一会话**
-- ✅ **完整保留所有统计数据（距离、时间、卡路里等）**
-- ✅ **包含海拔上升/下降数据（增强版）**
-- ✅ 合并圈数数据
-
-**增强版合并器测试输出示例**：
 ```
-开始合并 6 个FIT文件到 merged.fit
-使用合并器类型: enhanced
-解析文件: fit_files/保定市公路骑行20260504094905.fit
-  成功提取: 记录=18293, 会话=1, 圈数=4, 事件=92
-  记录数据字段: 距离
-...
-合并 6 个文件的数据
-记录总数: 135930
-原始会话数: 6
-圈数: 18
-事件数: 440
-
-=== 原始会话数据 ===
-会话 1: 距离=160905.72 m, 耗时=20867.28 s, 计时=18291.83 s, 卡路里=2688 kcal, 上升=270 m, 下降=217 m
-会话 2: 距离=283432.06 m, 耗时=45919.98 s, 计时=39498.68 s, 卡路里=5029 kcal, 上升=291 m, 下降=282 m
-...
-=== 增强合并结果 ===
-合并后会话数: 1 (合并为单一会话)
-合并后总距离: 1020108.93 m (1020.11 km)
-合并后总时间: 162420.38 s (2707.01 min)
-合并后总卡路里: 17500 kcal
-合并后总上升: 1050 m
-合并后总下降: 953 m
-
-=== 详细数据分析 ===
-总记录数: 135930
-功率数据: ✅ 有 (135228 条记录)
-踏频数据: ✅ 有 (135651 条记录)
-心率数据: ✅ 有 (135791 条记录)
-速度数据: ✅ 有 (135924 条记录)
-距离数据: ✅ 有 (135930 条记录)
-海拔数据: ✅ 有 (135924 条记录)
-合并完成，耗时: 206.1545ms
+fit_merger/
+├── Cargo.toml
+├── src/
+│   ├── fit_types.rs        # FIT 协议字节级数据结构
+│   ├── fit_parser.rs       # 解析器（保留原始 payload 字节）
+│   ├── fit_generator.rs    # 生成器（含正确的 FIT CRC-16）
+│   ├── merger.rs           # 多文件合并逻辑
+│   ├── inspector.rs        # session 摘要提取与格式化
+│   ├── lib.rs
+│   └── main.rs             # CLI 入口
+└── tests/
+    ├── validate_merged.rs  # 用 fitparser 第三方库严格校验合并文件
+    └── dump_summary.rs     # 输出合并文件全部 session/activity 字段
 ```
 
-## 故障排除
+## 设计要点
 
-### 常见问题
+- **字节级合并**：parser 仅解析文件头 / 记录头 / 定义消息，数据消息整体复制原始字节，避免任何字段缩放 / 单位转换的失真。
+- **LMT 重映射**：跨文件合并时，每条 Definition 重新分配 `local_message_type`（0..=12 循环，13/14/15 保留给 activity / session / file_id），避免不同源文件 LMT 冲突。
+- **CRC**：严格按 FIT SDK 4-bit 表查表算法计算文件头 CRC 与末尾 CRC，符合协议要求。
+- **session 字段号**：严格遵循 FIT SDK profile 定义（`avg_speed=14`，`max_speed=15`，`avg_heart_rate=16`，`max_heart_rate=17`，`avg_cadence=18`，`max_cadence=19`，`avg_power=20`，`max_power=21` 等）。
 
-1. **功率、踏频等详细数据丢失**
-   - 使用最新版本的统一合并器，已修复详细数据保留问题
-   - 确保使用增强版合并器（`-t enhanced`）
+## 测试
 
-2. **上传平台显示数据不符**
-   - 使用增强版合并器（`-t enhanced`），专门针对上传平台优化
-   - 确保包含完整的数据字段和详细数据
-   - 距离不符时可以在strava上点击路线更正
+```bash
+# 单元测试（CRC 算法、时长格式化）
+cargo test --release --lib
 
-3. **"无法解码文件"**
-   - 文件可能损坏或不是有效的FIT格式
-   - 解决方案：尝试使用 `fit_converter.sh` 脚本
+# 集成测试：用 fitparser 0.10 校验 merged.fit 是 CRC 合法、单一 session
+cargo test --release --test validate_merged -- --nocapture
 
-4. **"文件不存在"**
-   - 检查文件路径是否正确
-   - 确保文件名中没有特殊字符
+# 输出合并文件 session/activity 全部字段
+cargo test --release --test dump_summary -- --nocapture
+```
 
-### 建议
+## 兼容性
 
-1. **备份原始文件**：在合并前备份所有原始FIT文件
-2. **验证结果**：合并后使用FIT查看器验证文件完整性
-3. **使用增强版合并器**：新的增强版合并器针对上传平台兼容性进行了优化，并保留所有详细数据
+合并产出的 `.fit` 文件已通过：
 
-## 更新日志
+- [fitparser 0.10](https://crates.io/crates/fitparser) 严格 CRC 校验
+- 字段保留检查：record 中 distance / heart_rate / cadence / power / altitude 全部存在
 
-### v4.0 - 详细数据保留修复
-- 修复功率、踏频、心率等详细数据丢失问题
-- 添加详细数据分析功能，显示所有数据字段统计
-- 确保所有记录级别的详细数据完整保留
-
-### v3.0 - 统一合并器 + 上传平台兼容性优化
-- 创建统一合并器，整合所有功能
-- 添加增强版合并器，针对上传平台兼容性优化
-- 更新智能转换器，支持选择合并器类型
-- 添加海拔上升/下降数据处理
-- 优化数据字段设置，提高上传平台兼容性
-
-### v2.0 - 现代合并器 + 数据完整性修复
-- 创建现代合并器，修复数据完整性问题
-- 实现单一会话合并功能
-- 使用 `muktihari/fit` 库替代 `tormoder/fit` 库
-
-### v1.0 - 初始版本
-- 创建简单合并器
-- 基本FIT文件合并功能
+可直接导入 Garmin Connect、Strava、TrainingPeaks 等支持 FIT 格式的运动平台。
