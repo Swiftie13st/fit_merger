@@ -1,3 +1,4 @@
+use fit_merger::gpx::convert_gpx_file;
 use fit_merger::inspector::{format_summary, summarize_file};
 use fit_merger::merger::merge_fit_files;
 use std::env;
@@ -8,7 +9,16 @@ fn print_usage(prog: &str) {
     eprintln!("用法:");
     eprintln!("  {} <input1.fit> <input2.fit> ... <output.fit>     # 合并多个 FIT 文件", prog);
     eprintln!("  {} inspect <file.fit> [<file2.fit> ...]            # 输出 FIT 文件的会话摘要", prog);
-    eprintln!("  {}                                                  # 默认：扫描 ../fit_files 合并", prog);
+    eprintln!("  {} gpx2fit <input.gpx> [output.fit]                # 将 GPX 转换为 FIT", prog);
+    eprintln!("  {}                                                  # 默认：扫描 fit_files 合并", prog);
+}
+
+/// 默认数据目录：优先当前工作目录下的 `fit_files`，兼容旧布局的 `../fit_files`。
+fn default_fit_dir() -> Option<PathBuf> {
+    ["fit_files", "../fit_files"]
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.is_dir())
 }
 
 fn run_inspect(paths: &[String]) -> i32 {
@@ -53,6 +63,50 @@ fn run_merge(inputs: &[String], output: &str) -> i32 {
     }
 }
 
+fn run_gpx2fit(input: &str, output: Option<&str>) -> i32 {
+    let output = match output {
+        Some(p) => p.to_string(),
+        None => PathBuf::from(input)
+            .with_extension("fit")
+            .to_string_lossy()
+            .to_string(),
+    };
+    println!("正在转换 GPX → FIT: {} → {}", input, output);
+    match convert_gpx_file(input, &output) {
+        Ok(s) => {
+            let hms = |total: u32| {
+                format!(
+                    "{:02}:{:02}:{:02}",
+                    total / 3600,
+                    (total % 3600) / 60,
+                    total % 60
+                )
+            };
+            println!(
+                "✅ 转换成功：{} 个轨迹点 → 生成 {} 条 record（跳过缺时间 {} 个 / 时间未递增 {} 个）",
+                s.input_points, s.records, s.skipped_no_time, s.skipped_non_increasing
+            );
+            let calories = s
+                .calories
+                .map(|c| format!(", 卡路里={} kcal", c))
+                .unwrap_or_default();
+            println!(
+                "   距离={:.3} km{}, 耗时={}, 计时={}, 运动类型={}",
+                s.distance_m / 1000.0,
+                calories,
+                hms(s.elapsed_s),
+                hms(s.timer_s),
+                s.sport_name()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("❌ 转换失败：{}", e);
+            1
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
@@ -60,6 +114,18 @@ fn main() {
     if args.len() >= 2 && args[1] == "inspect" {
         let paths: Vec<String> = args[2..].to_vec();
         std::process::exit(run_inspect(&paths));
+    }
+
+    // gpx2fit 子命令
+    if args.len() >= 2 && args[1] == "gpx2fit" {
+        match args.len() {
+            3 => std::process::exit(run_gpx2fit(&args[2], None)),
+            4 => std::process::exit(run_gpx2fit(&args[2], Some(&args[3]))),
+            _ => {
+                eprintln!("gpx2fit 用法: {} gpx2fit <input.gpx> [output.fit]", args[0]);
+                std::process::exit(1);
+            }
+        }
     }
 
     // help
@@ -75,13 +141,18 @@ fn main() {
         std::process::exit(run_merge(&inputs, &output));
     }
 
-    // 默认：扫描 ../fit_files 目录中的所有 .fit 文件，输出到 merged.fit
-    println!("未指定参数，使用默认模式：扫描 ../fit_files 下的 .fit 文件");
-    let dir = PathBuf::from("../fit_files");
-    if !dir.exists() {
-        print_usage(&args[0]);
-        std::process::exit(1);
-    }
+    // 默认：扫描 fit_files 目录中的所有 .fit 文件，输出到 merged.fit
+    let dir = match default_fit_dir() {
+        Some(dir) => dir,
+        None => {
+            print_usage(&args[0]);
+            std::process::exit(1);
+        }
+    };
+    println!(
+        "未指定参数，使用默认模式：扫描 {} 下的 .fit 文件",
+        dir.display()
+    );
     let mut paths: Vec<String> = match fs::read_dir(&dir) {
         Ok(rd) => rd
             .filter_map(|e| e.ok())
@@ -107,8 +178,10 @@ fn main() {
     };
     paths.sort();
     if paths.is_empty() {
-        eprintln!("../fit_files 中没有 .fit 文件");
+        eprintln!("{} 中没有 .fit 文件", dir.display());
         std::process::exit(1);
     }
-    std::process::exit(run_merge(&paths, "../fit_files/merged.fit"));
+    let output = dir.join("merged.fit").to_string_lossy().to_string();
+    std::process::exit(run_merge(&paths, &output));
 }
+gpx_to_fit.rs
